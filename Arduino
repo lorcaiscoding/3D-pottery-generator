@@ -1,0 +1,26 @@
+#include <Arduino.h>
+
+const int joyXPin = A0;
+const int joyYPin = A1;
+const int joyButtonPin = 2;
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(joyButtonPin, INPUT_PULLUP);
+}
+
+void loop() {
+  int joyX = analogRead(joyXPin);
+  int joyY = analogRead(joyYPin);
+
+  bool buttonPressed = digitalRead(joyButtonPin) == LOW;
+
+  Serial.print(joyX);
+  Serial.print(",");
+  Serial.print(joyY);
+  Serial.print(",");
+  Serial.println(buttonPressed ? "1" : "0");
+
+  delay(10);
+}
