@@ -1,0 +1,177 @@
+let scene, camera, renderer, pottery;
+let potteryMaterial;
+let points = [];
+let isDrawing = false;
+const canvasSize = 500;
+
+let serial;
+let latestData = "waiting for data";
+let crosshairPos;
+
+let lastJoyX = 512;
+let lastJoyY = 512;
+
+const sketch = (p) => {
+  p.setup = () => {
+    p.createCanvas(canvasSize, canvasSize).style('position', 'absolute');
+    initThreeJS();
+    initSerial();
+    crosshairPos = p.createVector(canvasSize / 2, canvasSize / 2);
+  };
+
+  p.draw = () => {
+    p.background(0, 0, 244);
+
+    p.stroke(255);
+    p.line(crosshairPos.x - 5, crosshairPos.y, crosshairPos.x + 5, crosshairPos.y);
+    p.line(crosshairPos.x, crosshairPos.y - 5, crosshairPos.x, crosshairPos.y + 5);
+
+    if (isDrawing) {
+      p.beginShape();
+      p.noFill();
+      p.stroke(255); 
+      for (let v of points) {
+        p.vertex(v.x, v.y);
+      }
+      p.endShape();
+    }
+
+    handleSerialInput(p);
+  };
+};
+
+new p5(sketch);
+
+function initThreeJS() {
+ scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(100, canvasSize / canvasSize, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setSize(canvasSize, canvasSize);
+  renderer.domElement.style.position = 'absolute';
+  document.body.appendChild(renderer.domElement);
+
+  camera.position.set(0, 0, 8);
+
+  const textureLoader = new THREE.TextureLoader();
+  textureLoader.load('clay.JPG', function (texture) {
+    potteryMaterial = new THREE.MeshStandardMaterial({
+        map: texture,
+        side: THREE.DoubleSide
+      });
+    console.log("texture loaded");
+  }, undefined, function (error) {
+    console.error("texture not loaded:", error);
+  });
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+  directionalLight.position.set(0, 1, 0);
+  scene.add(directionalLight);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+  scene.add(ambientLight);
+
+  const pointLight = new THREE.PointLight(0xffffff, 1, 100);
+  pointLight.position.set(0, 5, 10);
+  scene.add(pointLight);
+
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+  if (pottery) {
+    pottery.rotation.y += 0.01;
+  }
+}
+
+function create3DPottery() {
+  let minY = Math.min(...points.map(p => p.y));
+  let maxY = Math.max(...points.map(p => p.y));
+  let centerY = (minY + maxY) / 2;
+
+  let adjustedPoints = points.map(p => {
+    let distance = p.x / 150;
+    let height = -(p.y - centerY) / 100 - 3; 
+    return new THREE.Vector2(distance, height);
+  });
+
+  if (adjustedPoints.length > 0) {
+    adjustedPoints.push(new THREE.Vector2(0, adjustedPoints[adjustedPoints.length - 1].y));
+  }
+
+  let geometry = new THREE.LatheGeometry(adjustedPoints, 20);
+  if (pottery) scene.remove(pottery);
+
+  if (potteryMaterial) {
+    pottery = new THREE.Mesh(geometry, potteryMaterial);
+  } else {
+    console.log("texture material not loaded, use default material");
+    pottery = new THREE.Mesh(geometry, new THREE.MeshNormalMaterial({ side: THREE.DoubleSide }));
+  }
+
+  scene.add(pottery);
+}
+
+function initSerial() {
+  serial = new p5.SerialPort();
+  serial.openPort('/dev/tty.usbmodem14101');
+
+  serial.on('connected', serverConnected);
+  serial.on('data', gotData);
+  serial.on('error', gotError);
+  serial.on('open', gotOpen);
+  serial.on('close', gotClose);
+}
+
+function serverConnected() {
+  console.log("Connected to Server");
+}
+
+function gotOpen() {
+  console.log("Serial Port is Open");
+}
+
+function gotClose() {
+  console.log("Serial Port is Closed");
+}
+
+function gotError(theerror) {
+  console.log(theerror);
+}
+
+function gotData() {
+  let currentString = serial.readStringUntil("\r\n");
+  if (currentString.length > 0) {
+    latestData = currentString;
+  }
+}
+
+function handleSerialInput(p) {
+  if (latestData !== "waiting for data") {
+    let sensors = latestData.split(',');
+    if (sensors.length > 2) {
+      let joyX = parseInt(sensors[0]);
+      let joyY = parseInt(sensors[1]);
+      let buttonPressed = sensors[2] === '1';
+
+      crosshairPos.x = p.map(joyY, 0, 1023, 0, canvasSize);
+
+      crosshairPos.y = p.map(joyX, 0, 1023, canvasSize, 0);
+
+      if (buttonPressed && (joyX !== lastJoyX || joyY !== lastJoyY)) {
+        if (!isDrawing) {
+          points = [];
+          isDrawing = true;
+        }
+        points.push(crosshairPos.copy());
+      } else if (!buttonPressed && isDrawing) {
+        isDrawing = false;
+        create3DPottery();
+      }
+
+      lastJoyX = joyX;
+      lastJoyY = joyY;
+    }
+  }
+}
